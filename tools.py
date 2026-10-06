@@ -21,8 +21,36 @@ the description has to say what is *in* the list.
 """
 
 import config  # noqa: F401 — you'll use this in search_listings
+import re
+
 from generate import generate
 from utils.data_loader import load_listings
+
+
+def _tokenize(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+
+def _size_matches(listing_size: str | None, filter_size: str | None) -> bool:
+    if filter_size is None:
+        return True
+    if listing_size is None:
+        return False
+
+    listing = str(listing_size).lower()
+    target = str(filter_size).lower()
+    target_tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", target)
+        if token not in {"size", "in"}
+    }
+    if not target_tokens:
+        return True
+    if any(token in listing for token in target_tokens):
+        return True
+    # Allow a size like "M" to match "S/M" and similar combined labels.
+    shortened = listing.replace("/", " ")
+    return any(token in shortened for token in target_tokens)
 
 
 # ── Tool 1: search_listings ───────────────────────────────────────────────────
@@ -66,20 +94,47 @@ def search_listings(
     Note that `brand` is None for most listings. That is deliberate and
     realistic — thrift listings often have no brand. If something you write
     assumes a brand is always there, you will find out in unit 4.
-
-    TODO:
-        1. Load every listing with load_listings().
-        2. Filter by max_price and by size, when each is provided.
-        3. Score what's left by keyword overlap with `description`.
-        4. Drop anything scoring zero.
-        5. Sort by score, highest first, and return the listing dicts —
-           at most config.SEARCH_RESULT_LIMIT of them.
-
-    Test it from a terminal before you move on:
-        python -c "from tools import search_listings; print(search_listings('graphic tee', max_price=30))"
     """
-    # TODO: replace this with your implementation
-    return []
+    description_text = (description or "").strip()
+    if not description_text:
+        return []
+
+    keywords = [
+        token
+        for token in _tokenize(description_text)
+        if token not in {"under", "price", "size", "in", "for", "the", "a", "an"}
+    ]
+    if not keywords:
+        return []
+
+    matches = []
+    for listing in load_listings():
+        price = listing.get("price")
+        if max_price is not None and price is not None and float(price) > float(max_price):
+            continue
+        if not _size_matches(listing.get("size"), size):
+            continue
+
+        haystack = " ".join(
+            [
+                listing.get("title", ""),
+                listing.get("description", ""),
+                listing.get("category", ""),
+                " ".join(listing.get("style_tags", []) or []),
+                " ".join(listing.get("colors", []) or []),
+                str(listing.get("brand") or ""),
+            ]
+        ).lower()
+        score = 0
+        for keyword in keywords:
+            if keyword in haystack:
+                score += 2
+        if score == 0:
+            continue
+        matches.append((score, listing))
+
+    matches.sort(key=lambda item: (-item[0], float(item[1].get("price", 9999))))
+    return [listing for _, listing in matches[: config.SEARCH_RESULT_LIMIT]]
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
@@ -101,19 +156,37 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
         With an empty wardrobe, return general styling advice rather than
         raising or returning "". Unit 4 has you trigger the empty wardrobe on
         purpose, so decide now what it should do.
-
-    TODO:
-        1. Check whether wardrobe['items'] is empty.
-        2. If it is, ask the model for general styling ideas for this item.
-        3. If it isn't, format the wardrobe items into the prompt and ask for
-           specific combinations naming pieces the user already owns.
-        4. Return the model's response.
-
-    Test it from a terminal before you move on:
-        python -c "from tools import suggest_outfit; from utils.data_loader import get_example_wardrobe, load_listings; print(suggest_outfit(load_listings()[0], get_example_wardrobe()))"
     """
-    # TODO: replace this with your implementation
-    return ""
+    item_title = new_item.get("title") or new_item.get("name") or "this thrifted item"
+    item_price = new_item.get("price")
+    item_category = new_item.get("category") or "piece"
+
+    if not wardrobe or not wardrobe.get("items"):
+        prompt = (
+            f"Give me 2 outfit ideas for {item_title}, a {item_category}. "
+            f"The user has no saved wardrobe yet. Keep the advice general, wearable, "
+            f"and specific about vibe. Mention the item and suggest complementary basics."
+            f"{' Price: $' + str(item_price) if item_price is not None else ''}"
+        )
+        return generate(
+            prompt,
+            system="You are a concise fashion stylist who gives practical outfit suggestions.",
+        )
+
+    wardrobe_text = "\n".join(
+        f"- {item.get('category', 'unknown')}: {item.get('name', 'item')}"
+        for item in wardrobe.get("items", [])
+    )
+    prompt = (
+        f"Suggest 1 or 2 outfits that work with this new thrifted item: "
+        f"{item_title} ({item_category}, {'$' + str(item_price) if item_price is not None else 'price not listed'}). "
+        f"Use only the pieces the user already owns from this wardrobe:\n{wardrobe_text}\n"
+        f"Keep the suggestions specific and casual, naming the existing wardrobe pieces."
+    )
+    return generate(
+        prompt,
+        system="You are a helpful personal stylist. Return practical outfit combinations using items already in the wardrobe.",
+    )
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
@@ -136,21 +209,27 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
     The caption should read like a real post rather than a product description,
     mention the item and its price and platform once each, and be specific about
     the vibe.
-
-    It should also come out **differently for different inputs**. If you run
-    this three times on the same item and get three word-for-word identical
-    strings, it's one of two things, and both are near the top of `config.py`:
-
-        • CACHE_ENABLED — the adapter handed back an answer it already had
-        • TEMPERATURE   — at 0.0 the model gives the same words every time
-
-    TODO:
-        1. Guard against an empty or whitespace-only `outfit`.
-        2. Build a prompt with the item details and the outfit.
-        3. Call generate() and return the response.
-
-    Test it from a terminal before you move on:
-        python -c "from tools import create_fit_card; from utils.data_loader import load_listings; print(create_fit_card('jeans and white sneakers', load_listings()[0]))"
     """
-    # TODO: replace this with your implementation
-    return ""
+    if not outfit or not outfit.strip():
+        title = new_item.get("title") or "this thrifted find"
+        price = new_item.get("price")
+        platform = new_item.get("platform") or "the marketplace"
+        return (
+            f"Found {title} for ${price} on {platform} — the kind of piece that instantly \
+            gives the outfit a lived-in, vintage edge."
+        )
+
+    item_title = new_item.get("title") or "this thrifted find"
+    item_price = new_item.get("price")
+    platform = new_item.get("platform") or "the marketplace"
+    prompt = (
+        f"Write a 2-4 sentence Instagram-style caption for this thrifted item: "
+        f"{item_title}. Price: ${item_price}. Platform: {platform}. "
+        f"Outfit idea: {outfit}. "
+        f"Make it sound like a real post, mention the item and price and platform once each, "
+        f"and keep the vibe specific and fun."
+    )
+    return generate(
+        prompt,
+        system="You are a witty fashion caption writer. Write polished, human-sounding captions for thrift finds.",
+    )

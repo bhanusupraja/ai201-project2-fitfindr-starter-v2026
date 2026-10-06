@@ -42,61 +42,30 @@ Given a query that matches no listings, the agent stops before calling
 
 ---
 
-## 3. Something about state
+## 3. The chosen item is carried through session state
 
-<!-- YOU WRITE THIS ONE.
-
-     How would you know that the item your search found is the same item the
-     next tool received? Name something countable or observable.
-
-     This is the criterion people find hardest, because state failure doesn't
-     look like state failure — it looks like a tool problem. Something that
-     compares session["selected_item"] against what actually reached
-     suggest_outfit is the shape you're after. -->
-
-
+For a query that matches at least one listing, the item in `session["selected_item"]` is the same title and price that the agent used for the next tool call in 5 of 5 tries.
 
 **Why this target:**
-
-
+This checks the actual state handoff rather than whether the search tool returned something reasonable. A broken session passed between tools can look like a model-quality problem, but the real cause is that the loop overwrote or changed the selected item before `suggest_outfit` ran.
 
 ---
 
-## 4. Something about the fit card
+## 4. The fit card includes the required information
 
-<!-- YOU WRITE THIS ONE.
-
-     The fit card calls a model, so the same input can produce different words
-     each time. That's not a bug — it's the nature of the tool. So what would
-     make it acceptable?
-
-     Think about what you'd actually be unhappy to see. A caption that never
-     mentions the price? Two different items producing the same opening
-     sentence? A card longer than a caption anyone would post? Any of those can
-     be turned into a number. -->
-
-
+For 5 different matching items, each fit card is 2 to 4 sentences long and includes the item title, the price, and the marketplace/platform name in the same caption, in 5 of 5 tries.
 
 **Why this target:**
-
-
+The model is allowed to vary wording, but a fit card that omits price or platform is not usable as a product post. This makes the requirement specific enough to score without demanding identical wording across runs.
 
 ---
 
-## 5. Your choice
+## 5. The price ceiling is respected during search
 
-<!-- YOU WRITE THIS ONE TOO.
-
-     Pick something you actually care about getting right. Speed, the empty
-     wardrobe path, what happens when the model can't be reached, whether the
-     search respects a price ceiling — anything, as long as it names a number
-     or an observable outcome. -->
-
-
+For 5 queries with a declared `under $X` limit, every returned listing costs at most the requested maximum, in 5 of 5 tries.
 
 **Why this target:**
-
-
+This is a concrete, observable behavior that matters to shoppers and is easy to validate from the session or the tool result. It is stricter than the loose “search is reasonable” standard and directly checks the tool’s filtering logic.
 
 ---
 
