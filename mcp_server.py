@@ -69,20 +69,24 @@ mcp = FastMCP("fitfindr", log_level="WARNING")
 
 # ── TODO: uncomment and fill this in ──────────────────────────────────────────
 #
-# @mcp.tool()
-# def search_listings(
-#     description: str,
-#     size: str | None = None,
-#     max_price: float | None = None,
-# ) -> list[dict]:
-#     """
-#     <-- YOUR DESCRIPTION GOES HERE.
-#
-#         One or two sentences. What does this tool do, what does it need, and
-#         what does it give back when it finds nothing? Written for a reader
-#         who cannot see the code.
-#     """
-#     return _search_listings_impl(description, size, max_price)
+@mcp.tool()
+def search_listings(
+    description: str,
+    size: str | None = None,
+    max_price: float | None = None,
+) -> list[dict]:
+    """
+    searches a fixed catalogue of 40 second hand clothing listings.
+    'description' is a free text and is matched against the listing's title,
+    description, category, style tags, colors and brand. 'size' is an optional string that filters the results to only include listings of that size. 'max_price' is an optional and it is in dollars and matched as a while size token, so "M" matches a listing sized "M", "S/M", "M/L" but not "XL".
+    a list of matching listings is returned, each listing is a dictionary with the following keys: 'title', 'description', 'category', 'style_tags', 'colors', 'brand', 'size', and 'price'.
+
+    Returns a list of listing dictionaries,best keyword match  first and cheaper first among equal matches. 
+    Each listing dictionary has the following keys: 'id', 'title', 'description', 'category', 'style_tags', 'colors', 'brand', 'size', and 'price'. If no listings match the search criteria, an empty list is returned. If size is None, all sizes are matched. If max_price is None, all prices are matched. Note that
+    it doesnt raise an empty is the normal case this tool says "no".
+    
+    """
+    return _search_listings_impl(description, size, max_price)
 #
 # ──────────────────────────────────────────────────────────────────────────────
 #

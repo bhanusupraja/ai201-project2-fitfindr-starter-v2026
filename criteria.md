@@ -25,9 +25,7 @@ Given a query that matches at least one listing, the agent completes all three
 tool calls and returns a fit card — in at least 4 of 5 tries.
 
 **Why this target:**
-<!-- Why 4 of 5 and not 5 of 5? Something about your search, probably —
-     "my search is a plain keyword match and some phrasings will miss" is a
-     real answer. -->
+This is a practical target for a keyword-based search with a live model: the search tool is deterministic, but the model output can vary. Requiring 4 of 5 is realistic because some queries will miss the exact keyword combination even when the listing exists in the catalog.
 
 ---
 
@@ -37,8 +35,7 @@ Given a query that matches no listings, the agent stops before calling
 `suggest_outfit` and returns a message naming what to change — 5 of 5 tries.
 
 **Why this target:**
-<!-- Why is 5 of 5 reasonable here when criterion 1 isn't? What's different
-     about this path? -->
+This path is controlled by the loop's empty-search branch, so it should be fully deterministic. A hard stop is the expected behavior here, and it is easy to validate without relying on any model output.
 
 ---
 

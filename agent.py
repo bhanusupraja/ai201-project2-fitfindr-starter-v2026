@@ -19,7 +19,7 @@ import config
 import trace
 from tools import search_listings, suggest_outfit, create_fit_card
 from generate import ModelUnavailable
-
+from mcp_client import call_tool
 
 # ── session state ─────────────────────────────────────────────────────────────
 
@@ -87,14 +87,14 @@ def run_agent(query: str, wardrobe: dict) -> dict:
         parsed["description"] = cleaned.strip() or query.strip()
         session["parsed"] = parsed
 
-        results = search_listings(
-            description=parsed["description"],
-            size=parsed["size"],
-            max_price=parsed["max_price"],
-        )
+        results = call_tool("search_listings", {
+            "description": parsed["description"],
+            "size": parsed["size"],
+            "max_price": parsed["max_price"],
+        })
         session["search_results"] = results
         trace.step(
-            "search_listings",
+            "search_listings (via MCP)",
             inputs={
                 "description": parsed["description"],
                 "size": parsed["size"],
@@ -133,8 +133,14 @@ def run_agent(query: str, wardrobe: dict) -> dict:
                 inputs={"item_title": session["selected_item"].get("title")},
                 returned=fit_card,
             )
-        except ModelUnavailable as exc:
-            session["error"] = str(exc)
+        except (ModelUnavailable, RuntimeError) as exc:
+            session["error"] = str(exc) or "Couldn't reach the model. Check your API key or try again later."
+            trace.step(
+                "branch: model unavailable",
+                inputs={"tool": "suggest_outfit_or_fit_card"},
+                returned=None,
+                note=str(exc),
+            )
             return session
 
         return session

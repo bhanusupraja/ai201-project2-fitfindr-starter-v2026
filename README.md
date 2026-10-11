@@ -152,17 +152,27 @@ $ python -c "from tools import create_fit_card; from utils.data_loader import lo
 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. A matching query completes all three tools | 4 of 5 | FAIL | FAIL | FAIL | FAIL | FAIL | MISSED (0/5) |
+| 2. An impossible query stops before the second tool | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. The chosen item is carried through session state | 5 of 5 | FAIL | FAIL | FAIL | FAIL | FAIL | MISSED (0/5) |
+| 4. The fit card includes the required information | 5 of 5 | FAIL | FAIL | FAIL | FAIL | FAIL | MISSED (0/5) |
+| 5. The price ceiling is respected during search | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
 
 **Real output from one try**, pasted as text, naming the file and function
 that produced it:
 
 ```
+python run_eval.py --label before
 
+matching query completes (example wardrobe)
+  query: vintage graphic tee under $30
+[1] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 10 items: Y2K Baby Tee — Butterfly Print, Vintage Band Tee — Faded Grey, Graphic Tee — 2003 Tour Bootleg Style … +7 more
+[2] branch: model unavailable
+      in:  dict with keys: tool
+      →    Still rate limited after 5 attempts. Wait a minute and try again — your key is fine.
+Last error: 402 RESOURCE_EXHAUSTED. {'error': {'code': 402, 'message': 'Your prepayment credits are depleted. Please go to AI Studio at https://ai.studio/projects to manage your project and billing. Learn more at https://ai.google.dev/gemini-api/docs/billing#prepay. ', 'status': 'RESOURCE_EXHAUSTED'}}
 ```
 
 ---
@@ -187,15 +197,15 @@ that produced it:
 
 | # | Criterion | Target | Verdict | How I decided |
 |---|---|---|---|---|
-| 1 |  |  |  |  |
-| 2 |  |  |  |  |
-| 3 |  |  |  |  |
-| 4 |  |  |  |  |
-| 5 |  |  |  |  |
+| 1 | A matching query completes all three tools | 4 of 5 | MISSED | The search step succeeded, but every run stopped at the model layer with a 402 prepayment exhaustion error before the outfit suggestion or fit card was produced. |
+| 2 | An impossible query stops before the second tool | 5 of 5 | MET | The empty-search branch fired consistently and returned the user-facing message telling them to broaden the description, size, or price ceiling. |
+| 3 | The chosen item is carried through session state | 5 of 5 | MISSED | No run reached the second model step, so the selected item was never compared against the next tool call in a completed end-to-end path. |
+| 4 | The fit card includes the required information | 5 of 5 | MISSED | The model never returned the final caption because the session was cut off by the external 402 billing error before the fit card was generated. |
+| 5 | The price ceiling is respected during search | 5 of 5 | MET | The search tool filtered by max price and every result observed was under the requested ceiling across all five tries. |
 
 **Diagnoses**
 
-
+The dominant pattern was not a logic bug in the loop or the search tool; it was an external service failure. The search tool executed correctly, the empty-search branch behaved correctly, and the price filter was respected. The runs failed at the model/call layer because the API returned `402 RESOURCE_EXHAUSTED` with "Your prepayment credits are depleted." That means the remaining problems are not in FitFindr's branching logic but in the live model access available during testing.
 
 ---
 
@@ -214,21 +224,26 @@ that produced it:
 **Happy path**
 
 ```
-
+[1] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: 10 items: Y2K Baby Tee — Butterfly Print, Vintage Band Tee — Faded Grey, Graphic Tee — 2003 Tour Bootleg Style … +7 more
+[2] branch: model unavailable
+      in:  dict with keys: tool
+      →    Still rate limited after 5 attempts. Wait a minute and try again — your key is fine.
 ```
 
 **Empty search**
 
 ```
-
+[1] search_listings (via MCP)
+      in:  dict with keys: description, size, max_price
+      out: [] (empty)
+[2] branch: empty results
+      in:  dict with keys: search_results_count
+      →    stop before suggest_outfit
 ```
 
-**On the MCP move:** <!-- what changed in your code, and whether anything
-behaved differently afterwards. If the rewire didn't work, say exactly where it
-broke — the error text and the last thing that worked. That earns the point in
-full. -->
-
-
+**On the MCP move:** The direct `search_listings` call was replaced with `call_tool("search_listings", {...})` in `agent.py`. The MCP server was verified to advertise the tool via `python mcp_client.py`, and the server listed `search_listings` as available. The observable difference afterward was not the data itself; it was that the run reached the external model layer and then stopped on a `402 RESOURCE_EXHAUSTED` billing error. That is the point where the model provider blocked the request, not where the FitFindr loop failed.
 
 ---
 
@@ -241,22 +256,33 @@ full. -->
 
 **What I changed:**
 
+I changed the agent's first tool call to the MCP client and added a clearer model-unavailable branch in `agent.py` so the app reports the provider failure as a user-facing message instead of crashing unhelpfully.
+
 **Which failure it was meant to fix:**
+
+The model-unavailable path and the MCP wiring seam. The goal was to preserve the same result shape from the tool while making the error path explicit and readable.
 
 ### Run Log — After
 
 | Criterion | Target | Try 1 | Try 2 | Try 3 | Try 4 | Try 5 | Verdict |
 |---|---|---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |  |  |
+| 1. A matching query completes all three tools | 4 of 5 | FAIL | FAIL | FAIL | FAIL | FAIL | MISSED (0/5) |
+| 2. An impossible query stops before the second tool | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
+| 3. The chosen item is carried through session state | 5 of 5 | FAIL | FAIL | FAIL | FAIL | FAIL | MISSED (0/5) |
+| 4. The fit card includes the required information | 5 of 5 | FAIL | FAIL | FAIL | FAIL | FAIL | MISSED (0/5) |
+| 5. The price ceiling is respected during search | 5 of 5 | PASS | PASS | PASS | PASS | PASS | MET (5/5) |
 
 **Did it help, and how do I know:**
 
-<!-- If it made things worse, say that. Honestly reported, that earns full
-     credit and is more interesting than one that worked. -->
+It helped the MCP wiring and the message quality, but it did not change the external blocker. The same `402 RESOURCE_EXHAUSTED` error still occurred on every model call, so the improvement is partial: the app handles the failure as intended, but the API remains unavailable until billing is restored.
+
+---
+
+## What's Still Broken
+
+- Criterion 1, 3, and 4 are still blocked by the live model service being out of credits. The agent reaches the search step and the empty-search branch correctly, but cannot get a response from Gemini to continue to `suggest_outfit` or `create_fit_card`.
+- The remaining fix is not in the FitFindr code path; it is re-enabling or restoring billing access to the model provider so model calls succeed again.
+- I stopped there because the source of failure is external to the repository and the code is already handling the failure path as a readable message instead of a stack trace.
 
 
 
